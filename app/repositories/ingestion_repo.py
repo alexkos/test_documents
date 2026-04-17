@@ -12,15 +12,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def create_ingestion_run(session: Session) -> IngestionRun:
-    run = IngestionRun(
-        started_at=utcnow(),
-        status="running",
-        total_records=0,
-        success_count=0,
-        error_count=0,
-        skipped_count=0,
-    )
+def create_ingestion_run(session: Session, *, queued: bool = False) -> IngestionRun:
+    """Create a run. Use ``queued=True`` for API/Celery (``started_at`` set when worker begins)."""
+    if queued:
+        run = IngestionRun(
+            started_at=None,
+            status="queued",
+            total_records=0,
+            success_count=0,
+            error_count=0,
+            skipped_count=0,
+        )
+    else:
+        run = IngestionRun(
+            started_at=utcnow(),
+            status="running",
+            total_records=0,
+            success_count=0,
+            error_count=0,
+            skipped_count=0,
+        )
     session.add(run)
     session.flush()
     return run

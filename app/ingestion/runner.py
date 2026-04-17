@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.exceptions import IngestionValidationError, SemanticDuplicateError
 from app.ingestion.normalizer import normalize_raw_record
 from app.ingestion.parser import parse_line
-from app.ingestion.validator import validate_normalized
+from app.ingestion.validator import validate_normalized, validate_raw_record
 from app.models import IngestionRun
 from app.repositories.document_repo import upsert_document
 from app.repositories.ingestion_repo import log_event, utcnow
@@ -30,9 +29,8 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             total += 1
             raw: dict[str, Any] | None = None
             ext_for_log: str | None = None
-            try:
-                raw = parse_line(line)
-            except json.JSONDecodeError as e:
+            raw = parse_line(line)
+            if raw is None:
                 error += 1
                 log_event(
                     session,
@@ -40,7 +38,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
                     external_id=None,
                     stage="parsing",
                     status="error",
-                    message=f"invalid JSON: {e}",
+                    message="invalid JSON or empty payload",
                 )
                 continue
 
@@ -59,6 +57,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             ext_for_log = str(raw.get("external_id", "")).strip() or None
 
             try:
+                validate_raw_record(raw)
                 normalized = normalize_raw_record(raw)
                 validate_normalized(normalized)
                 upsert_document(session, normalized)

@@ -1,26 +1,26 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.models import IngestionRun
-from app.services.ingestion_service import queue_ingestion_path, run_ingestion_job
+from app.services.ingestion_service import queue_ingestion_path
+from app.tasks.ingestion_tasks import run_ingestion_task
 
 router = APIRouter()
 
 
 @router.post("")
 def trigger_ingestion(
-    background_tasks: BackgroundTasks,
     file_path: str | None = None,
 ) -> dict:
     try:
         run_id, resolved = queue_ingestion_path(file_path)
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
-    background_tasks.add_task(run_ingestion_job, run_id, resolved)
-    return {"run_id": run_id}
+    run_ingestion_task.delay(run_id, str(resolved.resolve()))
+    return {"run_id": run_id, "status": "queued"}
 
 
 @router.get("/{run_id}")

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import resolved_jsonl_path
 from app.db import get_session_factory, get_db
-from app.ingestion import create_ingestion_run, ingest_file
+from app.ingestion import create_ingestion_run
 from app.models import Document, IngestionRun, Organization, Tag
+from app.tasks.ingestion_tasks import run_ingestion_task
 
 router = APIRouter()
 
@@ -29,10 +30,7 @@ def _parse_date(s: str | None) -> date | None:
 
 
 @router.post("/ingestions")
-def run_ingestion(
-    background_tasks: BackgroundTasks,
-    file_path: str | None = None,
-) -> dict:
+def run_ingestion(file_path: str | None = None) -> dict:
     path = Path(file_path) if file_path else resolved_jsonl_path()
     if not path.is_file():
         raise HTTPException(status_code=400, detail=f"file not found: {path}")
@@ -40,32 +38,14 @@ def run_ingestion(
     SessionLocal = get_session_factory()
     db = SessionLocal()
     try:
-        run = create_ingestion_run(db)
+        run = create_ingestion_run(db, queued=True)
         run_id = run.id
         db.commit()
     finally:
         db.close()
 
-    def _job() -> None:
-        db2 = SessionLocal()
-        try:
-            run_row = db2.get(IngestionRun, run_id)
-            if run_row is None:
-                return
-            ingest_file(db2, path, run_row)
-            db2.commit()
-        except Exception:
-            db2.rollback()
-            run_row = db2.get(IngestionRun, run_id)
-            if run_row is not None:
-                run_row.status = "failed"
-                run_row.finished_at = datetime.now(timezone.utc)
-                db2.commit()
-        finally:
-            db2.close()
-
-    background_tasks.add_task(_job)
-    return {"run_id": run_id}
+    run_ingestion_task.delay(run_id, str(path.resolve()))
+    return {"run_id": run_id, "status": "queued"}
 
 
 @router.get("/ingestions/{run_id}")

@@ -15,5 +15,38 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build: .
+    command:
+      [
+        "celery",
+        "-A",
+        "app.celery_app:celery_app",
+        "worker",
+        "--loglevel=info",
+      ]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://docintake:docintake@db:5432/docintake
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DEFAULT_JSONL_PATH: /app/input_docs/documents_1.jsonl
+    volumes:
+      - ./input_docs:/app/input_docs:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   docintake_pgdata:

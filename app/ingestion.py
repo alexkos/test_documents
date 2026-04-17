@@ -12,7 +12,7 @@ from app.exceptions import IngestionValidationError, SemanticDuplicateError
 from app.models import Author, Document, IngestionEvent, IngestionRun, Organization, Tag
 from app.normalize import NormalizedRecord, normalize_raw_record
 from app.processing import apply_processing, content_fingerprint
-from app.validate import validate_normalized
+from app.validate import validate_normalized, validate_raw_record
 
 
 def _utcnow() -> datetime:
@@ -195,6 +195,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             ext_for_log = str(raw.get("external_id", "")).strip() or None
 
             try:
+                validate_raw_record(raw)
                 normalized = normalize_raw_record(raw)
                 validate_normalized(normalized)
                 _doc, _action = upsert_document(session, normalized)
