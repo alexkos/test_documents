@@ -3,14 +3,29 @@ from __future__ import annotations
 from datetime import date
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import Document, Organization, Tag
 
+_SKIP_COLUMNS = frozenset({"author_id", "organization_id"})
+
 
 def _document_to_out(doc: Document) -> dict:
+    base = {
+        c.name: getattr(doc, c.name)
+        for c in Document.__table__.columns
+        if c.name not in _SKIP_COLUMNS
+    }
+    author: dict[str, int | str] | None = None
+    if doc.author_id is not None and doc.author is not None:
+        author = {"id": doc.author.id, "name": doc.author.name}
+    organization: dict[str, int | str] | None = None
+    if doc.organization_id is not None and doc.organization is not None:
+        organization = {"id": doc.organization.id, "name": doc.organization.name}
     return {
-        **{c.name: getattr(doc, c.name) for c in Document.__table__.columns},
+        **base,
+        "author": author,
+        "organization": organization,
         "tags": [t.name for t in doc.tags],
     }
 
@@ -63,7 +78,12 @@ def list_documents(
 
     total = db.scalar(count_q) or 0
     id_subq = id_q.distinct().order_by(Document.id).offset(skip).limit(limit).subquery()
-    q = select(Document).join(id_subq, Document.id == id_subq.c.id).order_by(Document.id)
+    q = (
+        select(Document)
+        .options(selectinload(Document.author), selectinload(Document.organization))
+        .join(id_subq, Document.id == id_subq.c.id)
+        .order_by(Document.id)
+    )
     rows = db.execute(q).scalars().all()
     return {
         "items": [_document_to_out(d) for d in rows],
@@ -74,7 +94,11 @@ def list_documents(
 
 
 def get_document(db: Session, doc_id: int) -> dict | None:
-    doc = db.get(Document, doc_id)
+    doc = db.scalar(
+        select(Document)
+        .where(Document.id == doc_id)
+        .options(selectinload(Document.author), selectinload(Document.organization))
+    )
     if doc is None:
         return None
     return _document_to_out(doc)

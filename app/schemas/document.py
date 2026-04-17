@@ -6,6 +6,20 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 
+class AuthorRef(BaseModel):
+    """Related author embedded in document responses."""
+
+    id: int
+    name: str
+
+
+class OrganizationRef(BaseModel):
+    """Related organization embedded in document responses."""
+
+    id: int
+    name: str
+
+
 class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,8 +48,8 @@ class DocumentOut(BaseModel):
     classification: str | None
     keywords: list[Any] | None
     content_fingerprint: str | None
-    author_id: int | None
-    organization_id: int | None
+    author: AuthorRef | None = None
+    organization: OrganizationRef | None = None
     tags: list[str] = []
 
 

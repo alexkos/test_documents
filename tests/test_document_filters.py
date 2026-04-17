@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import Document, Organization, Tag
+from app.models import Author, Document, Organization, Tag
 
 
 @pytest.fixture
@@ -23,12 +23,17 @@ def client_with_docs(db_session):
     db_session.add_all([t_alpha, t_beta])
     db_session.flush()
 
+    author = Author(name="Jane Writer")
+    db_session.add(author)
+    db_session.flush()
+
     d1 = Document(
         external_id="ext-filter-1",
         title="UniqueTitleOne",
         body="body-foo",
         published_at=date(2020, 1, 10),
         status="published",
+        author_id=author.id,
         organization_id=o_a.id,
     )
     d1.tags.append(t_alpha)
@@ -144,3 +149,26 @@ def test_combined_tag_and_organization(client_with_docs: TestClient) -> None:
     data = r.json()
     assert data["total"] == 2
     assert _external_ids(data) == {"ext-filter-1", "ext-filter-3"}
+
+
+def test_nested_author_and_organization_on_list(client_with_docs: TestClient) -> None:
+    r = client_with_docs.get("/documents")
+    assert r.status_code == 200
+    by_ext = {item["external_id"]: item for item in r.json()["items"]}
+    a1 = by_ext["ext-filter-1"]["author"]
+    assert a1 is not None and a1["name"] == "Jane Writer" and isinstance(a1["id"], int)
+    assert by_ext["ext-filter-1"]["organization"]["name"] == "Acme Corp"
+    assert by_ext["ext-filter-2"]["author"] is None
+    assert by_ext["ext-filter-2"]["organization"]["name"] == "Beta Inc"
+
+
+def test_get_document_includes_nested_related(client_with_docs: TestClient) -> None:
+    listed = client_with_docs.get("/documents").json()["items"]
+    doc_id = next(x["id"] for x in listed if x["external_id"] == "ext-filter-1")
+    r = client_with_docs.get(f"/documents/{doc_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["author"]["name"] == "Jane Writer"
+    assert body["organization"]["name"] == "Acme Corp"
+    assert "author_id" not in body
+    assert "organization_id" not in body

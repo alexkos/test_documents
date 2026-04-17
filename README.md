@@ -153,8 +153,8 @@ erDiagram
 |--------|------|-------------|
 | `POST` | `/ingestions` | Queue ingestion (`file_path` query optional). Returns `{ "run_id", "status": "queued" }`. |
 | `GET` | `/ingestions/{run_id}` | Run summary and event log. |
-| `GET` | `/documents` | Paginated list; filters: `date_from`, `date_to`, `tag`, `organization`, `status`, `search`, `skip`, `limit`. |
-| `GET` | `/documents/{id}` | Single document (includes tag names). |
+| `GET` | `/documents` | Paginated list; each item includes `tags`, and optional nested `author` / `organization` (`{ "id", "name" }` or `null`). Filters: `date_from`, `date_to`, `tag`, `organization`, `status`, `search`, `skip`, `limit`. |
+| `GET` | `/documents/{id}` | Single document with the same shape (tags plus nested `author` / `organization` when linked). |
 | `GET` | `/stats` | Counts, breakdowns, top tags, average score. |
 | `GET` | `/health` | Liveness. |
 
@@ -172,7 +172,7 @@ Interactive browsing with formatted bodies: open **Swagger UI** at [`http://loca
 
 ### `GET /documents` (curl examples)
 
-The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`.
+The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`. Each document object includes `author` and `organization` as `{ "id": <int>, "name": <string> }` when set, or `null` when not linked (top-level `author_id` / `organization_id` are not returned).
 
 Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches; `search` matches **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
 
@@ -334,7 +334,6 @@ curl -sS "http://localhost:8000/ingestions/3" | jq
 - **Full-text search** — PostgreSQL `tsvector` / GIN instead of `ILIKE` on title/body for large corpora.
 - **Authentication and rate limits** on `/ingestions` and bulk export endpoints.
 - **Explicit enrichment events** — optional `ingestion_events` rows for keyword/classification/summary stages (today enrichment runs in-process; only dedup/validation/parsing surface as stages in the event list).
-- **Nested author/organization** on `GET /documents/{id}` — return `{ "id", "name" }` objects instead of only foreign-key columns.
 - **Batch or streaming ingestion** — multipart uploads, S3/GCS sources, checkpointing for huge files.
 - **Observability** — OpenTelemetry traces, structured JSON logs to a collector, metrics (Prometheus) for ingest duration and queue depth.
 - **Load and contract tests** — performance budgets against sample multi-GB JSONL; OpenAPI response examples generated from fixtures.
