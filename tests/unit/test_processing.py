@@ -42,14 +42,31 @@ def test_extract_keywords_empty_returns_empty() -> None:
     assert extract_keywords("") == []
 
 
-def test_extract_keywords_filters_stopwords_and_counts() -> None:
+def test_extract_keywords_uses_tfidf_and_english_stopwords() -> None:
     text = "machine learning models learn from data; machine data"
     out = extract_keywords(text, top_n=5)
     assert "machine" in out
     assert "learning" in out
     assert "models" in out
     assert "data" in out
+    assert "from" not in out
+
+
+def test_extract_keywords_energy_market_example() -> None:
+    text = (
+        "The global energy market is experiencing rapid growth due to increasing demand "
+        "for renewable energy and rising oil prices. Energy companies are investing "
+        "heavily in solar and wind power."
+    )
+    # Single-document TF-IDF ranks rarer terms above one-off mentions; need enough slots
+    # for late-ranked terms like "solar" / "wind".
+    out = extract_keywords(text, top_n=18)
+    assert "energy" in out
+    assert "renewable" in out
+    assert "solar" in out
+    assert "wind" in out
     assert "the" not in out
+    assert "is" not in out
 
 
 def test_extract_keywords_hyphenated_words() -> None:
