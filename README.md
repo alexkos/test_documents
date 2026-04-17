@@ -4,16 +4,22 @@ FastAPI service that ingests messy JSONL document feeds, normalizes fields, enri
 
 ## How to run
 
+**Prerequisites:** Python 3.11 or newer, [uv](https://docs.astral.sh/uv/) for dependencies, and Docker with Compose (for PostgreSQL, Redis, Elasticsearch, and the bundled Celery worker).
+
 ```bash
-docker compose up -d
 cp .env.example .env
+docker compose up -d
 uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+- The first `docker compose up` **builds** the worker image (`worker` in `docker-compose.yml`) and can take several minutes. **Elasticsearch** may need extra time on a cold start before its health check passes; the worker starts only after `db`, `redis`, and `elasticsearch` are healthy.
+- Create a local **`input_docs/`** directory and place your JSONL there (it is gitignored). Defaults match `.env.example` (`DEFAULT_JSONL_PATH=input_docs/documents_1.jsonl`). Alternatively pass an absolute or project-relative path via `POST /ingestions?file_path=...`.
 - `docker compose` starts **PostgreSQL**, **Redis**, **Elasticsearch**, and a **Celery worker** (see `docker-compose.yml`). The worker uses the same image as the API, mounts `./input_docs` so `DEFAULT_JSONL_PATH` resolves inside the container, and sets `ELASTICSEARCH_URL=http://elasticsearch:9200` so successful ingests can be indexed for search.
-- Configure `DATABASE_URL` (localhost for uvicorn on the host), `DEFAULT_JSONL_PATH`, `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND`, and optionally `ELASTICSEARCH_URL` (e.g. `http://localhost:9200` when the compose ES service is up) in `.env` (see `.env.example`). The worker service overrides `DATABASE_URL` to reach Postgres at hostname `db`. Set `ELASTICSEARCH_ENABLED=0` to force SQL `ILIKE` for `search=` even when a URL is set.
+- Configure `DATABASE_URL` (localhost for uvicorn on the host), `DEFAULT_JSONL_PATH`, `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND`, and optionally `ELASTICSEARCH_URL` (e.g. `http://localhost:9200` when the compose ES service is up) in `.env` (see `.env.example`). Uncomment `ELASTICSEARCH_URL` if you want the **host-run API** to use the same ES instance as compose (for index setup and search). The worker service overrides `DATABASE_URL` to reach Postgres at hostname `db`. Set `ELASTICSEARCH_ENABLED=0` to force SQL `ILIKE` for `search=` even when a URL is set.
+- **Smoke check:** `curl -sS http://localhost:8000/health` should return `{"status":"ok"}`. Interactive API: [`http://localhost:8000/docs`](http://localhost:8000/docs).
+- If Elasticsearch is enabled after data already exists in Postgres, you can backfill the index with `uv run python scripts/reindex_elasticsearch.py` (requires `ELASTICSEARCH_URL` and a running ES).
 - Trigger ingestion: `POST /ingestions` (optional query param `file_path`). Response: `{ "run_id": ..., "status": "queued" }`. Poll `GET /ingestions/{run_id}` for progress (`status`: `queued` → `running` → `completed` or `failed`).
 
 **Celery worker on your machine (not Docker)** — Start Redis (and Postgres if needed). Export `DATABASE_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` from `.env` (or use a shell that loads `.env`). From the project root after `uv sync`:
@@ -65,9 +71,37 @@ flowchart LR
 - **FastAPI** HTTP layer: ingestions, document search, stats.
 - **PostgreSQL** for durable storage and `UNIQUE(external_id)` idempotency.
 - **Redis + Celery** for async ingestion: `POST /ingestions` enqueues work; the **worker** opens the JSONL file and runs the pipeline (not the API process).
-- **Elasticsearch** (optional): when `ELASTICSEARCH_URL` is set and not disabled (`app/config.py`), the API ensures an index on startup, each successful upsert calls `maybe_index_document` during ingestion (`app/ingestion/runner.py`), and the `search=` query parameter on `GET /documents` uses ES; on failure or when ES is off, search falls back to SQL `ILIKE` on title and body.
+- **Elasticsearch** (optional): when `ELASTICSEARCH_URL` is set and not disabled (`app/config.py`), **FastAPI** (`app/main.py` lifespan) and the **Celery worker** (`worker_ready` in `app/celery_app.py`) both call `ensure_elasticsearch_index`. Each successful upsert calls `maybe_index_document` during ingestion (`app/ingestion/runner.py`). On `GET /documents`, when ES is enabled and a `search` term is present, matching and most filters run in ES (see `app/search/queries.py`); the API then loads full rows from PostgreSQL by ID. If ES is unavailable, disabled, or search fails, listing falls back to SQL (`ILIKE` on title and body when searching).
 - **Ingestion pipeline** (see `app/ingestion/`): parse JSON line → **validate raw** (required `external_id`; `published_at` / `updated_at` must be valid `YYYY-MM-DD` when present) → **normalize** (coerce types, clean strings, tags, language, booleans; invalid DOI/URL dropped to `null`) → **validate normalized** (non-empty `external_id`) → upsert by `external_id` → semantic dedup via `content_fingerprint` (SHA-256 of normalized title + body) → enrichment in the same write path.
-- **Processing layer**: keyword frequencies (stopword-stripped), simple title/body classification, composite score, two-sentence summary.
+- **Processing layer** (see `app/processing/`): `apply_processing` (in `app/processing/__init__.py`) fills keywords, classification, score, and summary after each successful upsert. Semantic duplicate detection is enforced in `app/repositories/document_repo.py` using `content_fingerprint` from `app/utils/hash.py` (also re-exported from `app/processing/deduplication.py`).
+
+**Application layout**
+
+| Layer | Location | Role |
+|--------|----------|------|
+| HTTP routes | `app/api/routes/` | Thin handlers for `/ingestions`, `/documents`, `/stats`; `GET /health` lives in `app/main.py`. |
+| Dependencies | `app/api/deps.py` | `get_db` — FastAPI `Depends` for SQLAlchemy `Session`. |
+| Services | `app/services/` | `ingestion_service` — resolve JSONL path, create queued run; `document_service` — list/get with filters and ES vs SQL search; `stats_service` — aggregates for `/stats`. |
+| Repositories | `app/repositories/` | `document_repo` — upsert, tag/author/org linking, fingerprint dedup, calls `apply_processing`; `ingestion_repo` — run rows and `ingestion_events`. |
+| Schemas | `app/schemas/` | Pydantic models for API responses (e.g. documents, stats, ingestion payloads). |
+| Database | `app/db.py` | SQLAlchemy engine and session factory (used by services, repositories, Celery tasks, and scripts). |
+
+**Search** (`app/search/`)
+
+| Module | Role |
+|--------|------|
+| `client.py` | Elasticsearch client and index name. |
+| `index.py` | Index mapping, `ensure_elasticsearch_index` (API and worker startup), `maybe_index_document` after each successful upsert, bulk reindex helpers. |
+| `queries.py` | `search_document_ids` — full-text `multi_match` plus tag, organization, status, and `published_at` range in one ES query; returns ordered IDs and total for pagination; `document_service` loads `Document` rows from PostgreSQL in that order. |
+
+**Processing modules** (called from `document_repo` via `apply_processing`)
+
+| Module | Role |
+|--------|------|
+| `keywords.py` | Stopword-stripped keyword frequencies from title/abstract/body text. |
+| `classification.py` | Simple title/body classification from document type and text. |
+| `scoring.py` | Composite score from document fields and extracted signals. |
+| `summary.py` | Short (two-sentence) summary from body or abstract. |
 
 **Ingestion package layout**
 
@@ -84,7 +118,7 @@ flowchart LR
 
 | Module | Role |
 |--------|------|
-| `app/celery_app.py` | Celery app, JSON serialization, optional `CELERY_TASK_ALWAYS_EAGER` |
+| `app/celery_app.py` | Celery app, JSON serialization, optional `CELERY_TASK_ALWAYS_EAGER`; `worker_ready` ensures the ES index when configured |
 | `app/tasks/ingestion_tasks.py` | `run_ingestion_task(run_id, file_path)` — opens DB session, runs `ingest_file`, commits or marks run `failed` |
 
 ```mermaid
@@ -367,11 +401,63 @@ curl -sS "http://localhost:8000/ingestions/3" | jq
 }
 ```
 
-## What you would improve with more time
+## Future improvements
 
-- **Full-text search** — PostgreSQL `tsvector` / GIN instead of `ILIKE` on title/body for large corpora.
+Roadmap ideas for data quality, scale, search, processing, observability, consistency, API/DB, and developer experience.
+
+### 1. Data quality & ingestion
+
+- Add data quality scoring for documents.
+- Introduce a Dead Letter Queue (DLQ) for failed records.
+- Implement per-record retry instead of skipping.
+- Support schema versioning.
+
+### 2. Scalability
+
+- Batch (chunked) ingestion instead of per-record processing.
+- Increase Celery concurrency for parallel processing.
+- Support streaming ingestion (e.g., S3 / queues).
+
+### 3. Search enhancements
+
+- Improve relevance ranking (field boosting).
+- Add highlighting and faceted search (filters, aggregations).
+- Implement autocomplete.
+- Add synonym support.
+
+### 4. Processing improvements
+
+- Upgrade keyword extraction (TF-IDF / TextRank).
+- Use ML-based classification.
+- Improve duplicate detection (text similarity).
+- Add semantic search (embeddings).
+
+### 5. Observability
+
+- Add metrics (ingestion rate, errors, latency).
+- Structured logging.
+- Distributed tracing.
+
+### 6. Data consistency
+
+- Implement outbox pattern for DB → Elasticsearch sync.
+- Add reindexing jobs.
+- Ensure idempotent indexing.
+
+### 7. API & DB
+
+- Advanced filtering and cursor-based pagination.
+- Add PostgreSQL full-text search fallback.
+- Optimize indexes and partition large tables.
+
+### 8. Developer experience
+
+- Admin panel for ingestion monitoring.
+- CLI tools (reindex, retry, validate).
+- Improved documentation.
+
+### Additional ideas
+
 - **Authentication and rate limits** on `/ingestions` and bulk export endpoints.
 - **Explicit enrichment events** — optional `ingestion_events` rows for keyword/classification/summary stages (today enrichment runs in-process; only dedup/validation/parsing surface as stages in the event list).
-- **Batch or streaming ingestion** — multipart uploads, S3/GCS sources, checkpointing for huge files.
-- **Observability** — OpenTelemetry traces, structured JSON logs to a collector, metrics (Prometheus) for ingest duration and queue depth.
 - **Load and contract tests** — performance budgets against sample multi-GB JSONL; OpenAPI response examples generated from fixtures.
