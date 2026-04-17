@@ -34,3 +34,27 @@ def get_celery_broker_url() -> str:
 @lru_cache
 def get_celery_result_backend() -> str:
     return os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+
+
+@lru_cache
+def get_elasticsearch_url() -> str:
+    return os.getenv("ELASTICSEARCH_URL", "").strip()
+
+
+def elasticsearch_enabled() -> bool:
+    """Use Elasticsearch for full-text search when URL is set and not explicitly disabled."""
+    flag = os.getenv("ELASTICSEARCH_ENABLED", "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return False
+    return bool(get_elasticsearch_url())
+
+
+def elasticsearch_startup_summary() -> str:
+    """One-line description for logging whether full-text search uses Elasticsearch."""
+    flag = os.getenv("ELASTICSEARCH_ENABLED", "1").strip()
+    if flag.lower() in ("0", "false", "no", "off"):
+        return f"Elasticsearch: off (ELASTICSEARCH_ENABLED={flag!r})"
+    url = get_elasticsearch_url()
+    if not url:
+        return "Elasticsearch: off (ELASTICSEARCH_URL not set or empty)"
+    return f"Elasticsearch: on (url={url})"

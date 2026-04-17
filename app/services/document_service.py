@@ -5,9 +5,20 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.config import elasticsearch_enabled
 from app.models import Document, Organization, Tag
+from app.search.queries import search_document_ids
+from app.utils.logger import logger
 
 _SKIP_COLUMNS = frozenset({"author_id", "organization_id"})
+
+_LOG_SEARCH_MAX = 160
+
+
+def format_search_query_for_log(search_term: str) -> str:
+    if len(search_term) <= _LOG_SEARCH_MAX:
+        return search_term
+    return f"{search_term[: _LOG_SEARCH_MAX - 3]}..."
 
 
 def _document_to_out(doc: Document) -> dict:
@@ -50,6 +61,64 @@ def list_documents(
 ) -> dict:
     df = _parse_date(date_from)
     dt = _parse_date(date_to)
+    search_term = (search or "").strip()
+    sql_search_fallback = False
+    sql_search_reason = ""
+
+    if search_term and elasticsearch_enabled():
+        try:
+            ids, total = search_document_ids(
+                search_term,
+                skip=skip,
+                limit=limit,
+                date_from=df,
+                date_to=dt,
+                tag=tag,
+                organization=organization,
+                status=status,
+            )
+            qlog = format_search_query_for_log(search_term)
+            if not ids:
+                logger.info(
+                    f"Document search: Elasticsearch returned no documents "
+                    f"(total={total}) query={qlog!r}"
+                )
+                return {
+                    "items": [],
+                    "total": total,
+                    "skip": skip,
+                    "limit": limit,
+                }
+            logger.info(
+                f"Document search: Elasticsearch matched total={total} "
+                f"page_count={len(ids)} query={qlog!r}"
+            )
+            id_order = {doc_id: idx for idx, doc_id in enumerate(ids)}
+            q = (
+                select(Document)
+                .where(Document.id.in_(ids))
+                .options(
+                    selectinload(Document.author),
+                    selectinload(Document.organization),
+                    selectinload(Document.tags),
+                )
+            )
+            rows = list(db.execute(q).scalars().all())
+            rows.sort(key=lambda d: id_order.get(d.id, 10**9))
+            return {
+                "items": [_document_to_out(d) for d in rows],
+                "total": total,
+                "skip": skip,
+                "limit": limit,
+            }
+        except Exception as e:
+            sql_search_fallback = True
+            sql_search_reason = "elasticsearch search failed"
+            logger.warning(f"Elasticsearch search failed; falling back to SQL ilike: {e}")
+
+    if search_term and not elasticsearch_enabled():
+        sql_search_fallback = True
+        sql_search_reason = "elasticsearch disabled or ELASTICSEARCH_URL unset"
 
     # DISTINCT on full Document rows fails on PostgreSQL when `keywords` is JSON (no = operator).
     # De-duplicate by document id first, then load rows (portable across SQLite/Postgres).
@@ -71,8 +140,8 @@ def list_documents(
     if dt:
         id_q = id_q.where(Document.published_at <= dt)
         count_q = count_q.where(Document.published_at <= dt)
-    if search:
-        term = f"%{search}%"
+    if search_term:
+        term = f"%{search_term}%"
         id_q = id_q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
         count_q = count_q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
 
@@ -85,6 +154,12 @@ def list_documents(
         .order_by(Document.id)
     )
     rows = db.execute(q).scalars().all()
+    if search_term and sql_search_fallback:
+        qlog = format_search_query_for_log(search_term)
+        logger.info(
+            f"Document search: using SQL ilike ({sql_search_reason}) "
+            f"total={total} page_count={len(rows)} query={qlog!r}"
+        )
     return {
         "items": [_document_to_out(d) for d in rows],
         "total": total,

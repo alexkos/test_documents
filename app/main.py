@@ -5,12 +5,17 @@ from fastapi import FastAPI
 from app.api.routes import documents as documents_routes
 from app.api.routes import ingestions as ingestions_routes
 from app.api.routes import stats as stats_routes
+from app.config import elasticsearch_enabled, elasticsearch_startup_summary
+from app.search.index import ensure_elasticsearch_index
 from app.utils.logger import logger
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("Document intake API starting")
+    logger.info(elasticsearch_startup_summary())
+    if elasticsearch_enabled() and ensure_elasticsearch_index() is not None:
+        logger.info("Elasticsearch index ready")
     yield
     logger.info("Document intake API shutting down")
 

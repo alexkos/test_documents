@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.services.document_service import get_document, list_documents
+from app.services.document_service import format_search_query_for_log, get_document, list_documents
+from app.utils.logger import logger
 
 router = APIRouter()
 
 
 @router.get("")
 def documents(
+    request: Request,
     db: Session = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=200),
@@ -21,6 +23,13 @@ def documents(
     status: str | None = None,
     search: str | None = None,
 ) -> dict:
+    search_stripped = (search or "").strip()
+    if search_stripped:
+        base = f"{request.url.scheme}://{request.url.netloc}{request.url.path}"
+        logger.info(
+            f"GET {base} search={format_search_query_for_log(search_stripped)!r} "
+            f"skip={skip} limit={limit}"
+        )
     return list_documents(
         db,
         skip=skip,

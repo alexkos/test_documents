@@ -11,6 +11,7 @@ from app.ingestion.parser import parse_line
 from app.ingestion.validator import validate_normalized, validate_raw_record
 from app.models import IngestionRun
 from app.repositories.document_repo import upsert_document
+from app.search.index import maybe_index_document
 from app.repositories.ingestion_repo import log_event, utcnow
 from app.utils.logger import logger
 
@@ -65,7 +66,8 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
                 validate_raw_record(raw)
                 normalized = normalize_raw_record(raw)
                 validate_normalized(normalized)
-                upsert_document(session, normalized)
+                doc, _action = upsert_document(session, normalized)
+                maybe_index_document(doc)
                 success += 1
                 logger.debug(f"Ingested external_id={normalized.external_id!r} run_id={run.id}")
                 log_event(
