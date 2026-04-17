@@ -25,6 +25,27 @@ services:
       timeout: 3s
       retries: 5
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - docintake_esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s -o /dev/null -w '%{http_code}' http://localhost:9200 | grep -q 200",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   worker:
     build: .
     command:
@@ -40,6 +61,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       DEFAULT_JSONL_PATH: /app/input_docs/documents_1.jsonl
+      ELASTICSEARCH_URL: http://elasticsearch:9200
     volumes:
       - ./input_docs:/app/input_docs:ro
     depends_on:
@@ -47,6 +69,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
 
 volumes:
   docintake_pgdata:
+  docintake_esdata:

@@ -4,6 +4,8 @@ import os
 
 # Run Celery tasks inline in tests (no Redis broker required for API tests).
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "1")
+# Document list/search tests use SQL ilike; do not require a running Elasticsearch.
+os.environ["ELASTICSEARCH_URL"] = ""
 # Celery warns if this is set without Django installed (common in dev shells).
 os.environ.pop("DJANGO_SETTINGS_MODULE", None)
 

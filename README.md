@@ -12,8 +12,8 @@ uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- `docker compose` starts **PostgreSQL**, **Redis**, and a **Celery worker** (see `docker-compose.yml`). The worker uses the same image as the API and mounts `./input_docs` so `DEFAULT_JSONL_PATH` resolves inside the container.
-- Configure `DATABASE_URL` (localhost for uvicorn on the host), `DEFAULT_JSONL_PATH`, and `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` in `.env` (see `.env.example`). The worker service overrides `DATABASE_URL` to reach Postgres at hostname `db`.
+- `docker compose` starts **PostgreSQL**, **Redis**, **Elasticsearch**, and a **Celery worker** (see `docker-compose.yml`). The worker uses the same image as the API, mounts `./input_docs` so `DEFAULT_JSONL_PATH` resolves inside the container, and sets `ELASTICSEARCH_URL=http://elasticsearch:9200` so successful ingests can be indexed for search.
+- Configure `DATABASE_URL` (localhost for uvicorn on the host), `DEFAULT_JSONL_PATH`, `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND`, and optionally `ELASTICSEARCH_URL` (e.g. `http://localhost:9200` when the compose ES service is up) in `.env` (see `.env.example`). The worker service overrides `DATABASE_URL` to reach Postgres at hostname `db`. Set `ELASTICSEARCH_ENABLED=0` to force SQL `ILIKE` for `search=` even when a URL is set.
 - Trigger ingestion: `POST /ingestions` (optional query param `file_path`). Response: `{ "run_id": ..., "status": "queued" }`. Poll `GET /ingestions/{run_id}` for progress (`status`: `queued` → `running` → `completed` or `failed`).
 
 **Celery worker on your machine (not Docker)** — Start Redis (and Postgres if needed). Export `DATABASE_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` from `.env` (or use a shell that loads `.env`). From the project root after `uv sync`:
@@ -64,6 +64,8 @@ flowchart LR
 
 - **FastAPI** HTTP layer: ingestions, document search, stats.
 - **PostgreSQL** for durable storage and `UNIQUE(external_id)` idempotency.
+- **Redis + Celery** for async ingestion: `POST /ingestions` enqueues work; the **worker** opens the JSONL file and runs the pipeline (not the API process).
+- **Elasticsearch** (optional): when `ELASTICSEARCH_URL` is set and not disabled (`app/config.py`), the API ensures an index on startup, each successful upsert calls `maybe_index_document` during ingestion (`app/ingestion/runner.py`), and the `search=` query parameter on `GET /documents` uses ES; on failure or when ES is off, search falls back to SQL `ILIKE` on title and body.
 - **Ingestion pipeline** (see `app/ingestion/`): parse JSON line → **validate raw** (required `external_id`; `published_at` / `updated_at` must be valid `YYYY-MM-DD` when present) → **normalize** (coerce types, clean strings, tags, language, booleans; invalid DOI/URL dropped to `null`) → **validate normalized** (non-empty `external_id`) → upsert by `external_id` → semantic dedup via `content_fingerprint` (SHA-256 of normalized title + body) → enrichment in the same write path.
 - **Processing layer**: keyword frequencies (stopword-stripped), simple title/body classification, composite score, two-sentence summary.
 
@@ -87,21 +89,28 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A[JSONL files] --> B[FastAPI]
-    B --> C[Ingestion run]
+    Client[Client] --> API[FastAPI]
+    API --> Redis[(Redis broker)]
+    Redis --> W[Celery worker]
+    J[JSONL file] --> W
+    W --> C[Ingestion run + pipeline]
     C --> P[Parse line]
     P --> VR[Validate raw]
     VR --> N[Normalize]
     N --> VN[Validate normalized]
     VN --> U[Upsert + fingerprint + enrichment]
     U --> F[(PostgreSQL)]
+    U -. optional index .-> ES[(Elasticsearch)]
     C --> M[ingestion_events]
     M --> F
-    B --> Q[Query API]
+    API --> Q[Query API]
     Q --> F
+    Q -. search when enabled .-> ES
 ```
 
 ## Data model (ERD)
+
+Tables match SQLAlchemy models under `app/models/`. The diagram lists main columns; `documents` has additional nullable metadata fields (e.g. `citation_count`, `word_count`, `open_access`) used by normalization and the API.
 
 ```mermaid
 erDiagram
@@ -114,10 +123,23 @@ erDiagram
         int id PK
         string external_id UK
         text title
+        text abstract
         text body
-        string content_fingerprint UK
+        date published_at
+        date updated_at
+        string status
+        string document_type
+        string language
+        string region
+        text url
+        string doi
+        text summary
         float score
+        string classification
         json keywords
+        string content_fingerprint "UNIQUE when non-null"
+        int author_id FK
+        int organization_id FK
     }
 
     authors {
@@ -136,22 +158,30 @@ erDiagram
     }
 
     document_tags {
-        int document_id PK,FK
-        int tag_id PK,FK
+        int document_id FK
+        int tag_id FK
     }
 
     ingestion_runs {
         int id PK
         datetime started_at "nullable while queued"
+        datetime finished_at
+        int total_records
+        int success_count
+        int error_count
+        int skipped_count
         string status
     }
 
     ingestion_events {
         int id PK
         int ingestion_id FK
+        string external_id "nullable"
         string stage
         string status
+        string message
         json raw_payload
+        datetime created_at
     }
 ```
 
@@ -161,7 +191,7 @@ erDiagram
 |--------|------|-------------|
 | `POST` | `/ingestions` | Queue ingestion (`file_path` query optional). Returns `{ "run_id", "status": "queued" }`. |
 | `GET` | `/ingestions/{run_id}` | Run summary and event log. |
-| `GET` | `/documents` | Paginated list; each item includes `tags`, and optional nested `author` / `organization` (`{ "id", "name" }` or `null`). Filters: `date_from`, `date_to`, `tag`, `organization`, `status`, `search`, `skip`, `limit`. |
+| `GET` | `/documents` | Paginated list; each item includes `tags`, and optional nested `author` / `organization` (`{ "id", "name" }` or `null`). Filters: `date_from`, `date_to`, `tag`, `organization`, `status`, `search`, `skip`, `limit`. Response fields align with `DocumentOut` in `app/schemas/document.py` (full document columns plus `author`, `organization`, `tags`). |
 | `GET` | `/documents/{id}` | Single document with the same shape (tags plus nested `author` / `organization` when linked). |
 | `GET` | `/stats` | Counts, breakdowns, top tags, average score. |
 | `GET` | `/health` | Liveness. |
@@ -182,7 +212,7 @@ Interactive browsing with formatted bodies: open **Swagger UI** at [`http://loca
 
 The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`. Each document object includes `author` and `organization` as `{ "id": <int>, "name": <string> }` when set, or `null` when not linked (top-level `author_id` / `organization_id` are not returned).
 
-Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches; `search` matches **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
+Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches. With **Elasticsearch** enabled (`ELASTICSEARCH_URL` and not disabled), `search` uses the ES index (title/body text); otherwise it uses SQL **`ILIKE`** on **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
 
 ```bash
 # Pagination: skip (offset) and limit (1–200, default 20)

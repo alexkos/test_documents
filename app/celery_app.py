@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from celery.signals import worker_ready
 
 from app.config import get_celery_broker_url, get_celery_result_backend
+from app.utils.logger import logger
 
 celery_app = Celery(
     "document_intake",
@@ -27,3 +29,11 @@ celery_app.conf.update(
 if os.getenv("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes"):
     celery_app.conf.task_always_eager = True
     celery_app.conf.task_eager_propagates = True
+
+
+@worker_ready.connect
+def _ensure_elasticsearch_index_on_worker_start(sender=None, **kwargs) -> None:
+    from app.search.index import ensure_elasticsearch_index
+
+    if ensure_elasticsearch_index() is not None:
+        logger.info("Celery worker: Elasticsearch index ready")
