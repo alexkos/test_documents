@@ -35,12 +35,7 @@ def create_ingestion_run(session: Session, *, queued: bool = False) -> Ingestion
         )
     session.add(run)
     session.flush()
-    logger.debug(
-        "create_ingestion_run id=%s queued=%s status=%s",
-        run.id,
-        queued,
-        run.status,
-    )
+    logger.debug(f"create_ingestion_run id={run.id} queued={queued} status={run.status}")
     return run
 
 

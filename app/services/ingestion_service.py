@@ -21,11 +21,11 @@ def queue_ingestion_path(file_path: str | None) -> tuple[int, Path]:
         run = create_ingestion_run(db, queued=True)
         run_id = run.id
         db.commit()
-        logger.info("Created ingestion run_id=%s (queued) for path=%s", run_id, path)
+        logger.info(f"Created ingestion run_id={run_id} (queued) for path={path}")
         return run_id, path
     except Exception:
         db.rollback()
-        logger.exception("Failed to queue ingestion for path=%s", path)
+        logger.exception(f"Failed to queue ingestion for path={path}")
         raise
     finally:
         db.close()
@@ -41,12 +41,10 @@ def run_ingestion_job(run_id: int, path: Path) -> None:
         ingest_file(db, path, run_row)
         db.commit()
         logger.info(
-            "Synchronous ingestion job finished run_id=%s total=%s",
-            run_id,
-            run_row.total_records,
+            f"Synchronous ingestion job finished run_id={run_id} total={run_row.total_records}"
         )
     except Exception:
-        logger.exception("Synchronous ingestion job failed run_id=%s path=%s", run_id, path)
+        logger.exception(f"Synchronous ingestion job failed run_id={run_id} path={path}")
         db.rollback()
         run_row = db.get(IngestionRun, run_id)
         if run_row is not None:

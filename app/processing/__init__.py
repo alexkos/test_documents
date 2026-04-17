@@ -14,11 +14,7 @@ if TYPE_CHECKING:
 
 
 def apply_processing(doc: Document, rec: NormalizedRecord) -> None:
-    logger.debug(
-        "apply_processing document_id=%s external_id=%r",
-        doc.id,
-        rec.external_id,
-    )
+    logger.debug(f"apply_processing document_id={doc.id} external_id={rec.external_id!r}")
     blob = " ".join(filter(None, [rec.title, rec.abstract, rec.body]))
     doc.keywords = extract_keywords(blob)
     doc.classification = classify_document(rec.title, rec.body)

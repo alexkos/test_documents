@@ -101,11 +101,8 @@ def upsert_document(session: Session, rec: NormalizedRecord) -> tuple[Document, 
         )
         if conflict:
             logger.warning(
-                "Semantic duplicate fingerprint for external_id=%r conflicts with "
-                "document id=%s (external_id=%r); skipping",
-                rec.external_id,
-                conflict.id,
-                conflict.external_id,
+                f"Semantic duplicate fingerprint for external_id={rec.external_id!r} conflicts with "
+                f"document id={conflict.id} (external_id={conflict.external_id!r}); skipping"
             )
             raise SemanticDuplicateError(
                 "semantic duplicate fingerprint belongs to another document",
@@ -113,20 +110,15 @@ def upsert_document(session: Session, rec: NormalizedRecord) -> tuple[Document, 
             )
         _apply_record_to_document(session, existing, rec, fp)
         logger.info(
-            "Document %s (external_id=%r) was updated successfully",
-            existing.id,
-            rec.external_id,
+            f"Document {existing.id} (external_id={rec.external_id!r}) was updated successfully"
         )
         return existing, "updated"
 
     other = session.scalar(select(Document).where(Document.content_fingerprint == fp))
     if other:
         logger.warning(
-            "Semantic duplicate content fingerprint for new external_id=%r "
-            "(existing document id=%s external_id=%r); skipping",
-            rec.external_id,
-            other.id,
-            other.external_id,
+            f"Semantic duplicate content fingerprint for new external_id={rec.external_id!r} "
+            f"(existing document id={other.id} external_id={other.external_id!r}); skipping"
         )
         raise SemanticDuplicateError(
             f"semantic duplicate of document {other.external_id}",
@@ -137,5 +129,5 @@ def upsert_document(session: Session, rec: NormalizedRecord) -> tuple[Document, 
     session.add(doc)
     session.flush()
     _apply_record_to_document(session, doc, rec, fp)
-    logger.info("Document %s was created successfully", doc.id)
+    logger.info(f"Document {doc.id} was created successfully")
     return doc, "created"

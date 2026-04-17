@@ -22,11 +22,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
     success = error = skipped = 0
     total = 0
 
-    logger.info(
-        "Starting ingestion run_id=%s path=%s",
-        run.id,
-        path,
-    )
+    logger.info(f"Starting ingestion run_id={run.id} path={path}")
 
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -39,7 +35,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             raw = parse_line(line)
             if raw is None:
                 error += 1
-                logger.debug("Parse failure or empty JSON on line (run_id=%s)", run.id)
+                logger.debug(f"Parse failure or empty JSON on line (run_id={run.id})")
                 log_event(
                     session,
                     run,
@@ -52,7 +48,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
 
             if len(raw) == 0:
                 error += 1
-                logger.debug("Empty JSON object record (run_id=%s)", run.id)
+                logger.debug(f"Empty JSON object record (run_id={run.id})")
                 log_event(
                     session,
                     run,
@@ -71,11 +67,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
                 validate_normalized(normalized)
                 upsert_document(session, normalized)
                 success += 1
-                logger.debug(
-                    "Ingested external_id=%r run_id=%s",
-                    normalized.external_id,
-                    run.id,
-                )
+                logger.debug(f"Ingested external_id={normalized.external_id!r} run_id={run.id}")
                 log_event(
                     session,
                     run,
@@ -87,10 +79,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             except IngestionValidationError as e:
                 error += 1
                 logger.debug(
-                    "Validation error run_id=%s external_id=%r: %s",
-                    run.id,
-                    ext_for_log,
-                    e.message,
+                    f"Validation error run_id={run.id} external_id={ext_for_log!r}: {e.message}"
                 )
                 log_event(
                     session,
@@ -104,10 +93,7 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
             except SemanticDuplicateError as e:
                 skipped += 1
                 logger.debug(
-                    "Skipped row after duplicate handling run_id=%s external_id=%r: %s",
-                    run.id,
-                    ext_for_log,
-                    e.message,
+                    f"Skipped row after duplicate handling run_id={run.id} external_id={ext_for_log!r}: {e.message}"
                 )
                 log_event(
                     session,
@@ -126,10 +112,5 @@ def ingest_file(session: Session, path: Path, run: IngestionRun) -> None:
     run.finished_at = utcnow()
     run.status = "completed"
     logger.info(
-        "Finished ingestion run_id=%s total=%s success=%s errors=%s skipped=%s",
-        run.id,
-        total,
-        success,
-        error,
-        skipped,
+        f"Finished ingestion run_id={run.id} total={total} success={success} errors={error} skipped={skipped}"
     )

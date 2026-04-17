@@ -17,24 +17,20 @@ from app.utils.logger import logger
 def run_ingestion_task(run_id: int, file_path: str) -> dict[str, Any]:
     """Execute JSONL ingestion for a persisted run. Uses a fresh DB session (not FastAPI's)."""
     path = Path(file_path)
-    logger.info("Celery ingestion task started run_id=%s path=%s", run_id, path)
+    logger.info(f"Celery ingestion task started run_id={run_id} path={path}")
     SessionLocal = get_session_factory()
     db = SessionLocal()
     try:
         run_row = db.get(IngestionRun, run_id)
         if run_row is None:
-            logger.error("Celery ingestion task: run_id=%s not found in database", run_id)
+            logger.error(f"Celery ingestion task: run_id={run_id} not found in database")
             return {"run_id": run_id, "missing": 1}
 
         ingest_file(db, path, run_row)
         db.commit()
         logger.info(
-            "Celery ingestion task completed run_id=%s total=%s success=%s errors=%s skipped=%s",
-            run_id,
-            run_row.total_records,
-            run_row.success_count,
-            run_row.error_count,
-            run_row.skipped_count,
+            f"Celery ingestion task completed run_id={run_id} total={run_row.total_records} "
+            f"success={run_row.success_count} errors={run_row.error_count} skipped={run_row.skipped_count}"
         )
         return {
             "run_id": run_id,
@@ -44,7 +40,7 @@ def run_ingestion_task(run_id: int, file_path: str) -> dict[str, Any]:
             "skipped_count": run_row.skipped_count,
         }
     except Exception:
-        logger.exception("Celery ingestion task failed run_id=%s path=%s", run_id, path)
+        logger.exception(f"Celery ingestion task failed run_id={run_id} path={path}")
         db.rollback()
         run_row = db.get(IngestionRun, run_id)
         if run_row is not None:

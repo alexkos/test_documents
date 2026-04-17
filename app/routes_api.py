@@ -34,7 +34,7 @@ def _parse_date(s: str | None) -> date | None:
 def run_ingestion(file_path: str | None = None) -> dict:
     path = Path(file_path) if file_path else resolved_jsonl_path()
     if not path.is_file():
-        logger.warning("Ingestion requested but file not found: %s", path)
+        logger.warning(f"Ingestion requested but file not found: {path}")
         raise HTTPException(status_code=400, detail=f"file not found: {path}")
 
     SessionLocal = get_session_factory()
@@ -47,11 +47,7 @@ def run_ingestion(file_path: str | None = None) -> dict:
         db.close()
 
     run_ingestion_task.delay(run_id, str(path.resolve()))
-    logger.info(
-        "Queued ingestion run_id=%s path=%s (status=queued)",
-        run_id,
-        path.resolve(),
-    )
+    logger.info(f"Queued ingestion run_id={run_id} path={path.resolve()} (status=queued)")
     return {"run_id": run_id, "status": "queued"}
 
 
@@ -59,7 +55,7 @@ def run_ingestion(file_path: str | None = None) -> dict:
 def get_ingestion(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(IngestionRun, run_id)
     if run is None:
-        logger.warning("GET /ingestions/%s: run not found", run_id)
+        logger.warning(f"GET /ingestions/{run_id}: run not found")
         raise HTTPException(status_code=404, detail="ingestion run not found")
     return {
         "ingestion_id": run.id,
@@ -135,7 +131,7 @@ def list_documents(
 def get_document(doc_id: int, db: Session = Depends(get_db)) -> dict:
     doc = db.get(Document, doc_id)
     if doc is None:
-        logger.warning("GET /documents/%s: document not found", doc_id)
+        logger.warning(f"GET /documents/{doc_id}: document not found")
         raise HTTPException(status_code=404, detail="document not found")
     return _document_to_out(doc)
 

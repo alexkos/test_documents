@@ -1,0 +1,24 @@
+---
+description: Prefer f-strings for interpolated Python strings (logging, messages, SQL fragments).
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# Python string formatting
+
+- Use **f-strings** for interpolated strings, including messages passed to `logging` (e.g. `logger.info(f"... {x}")`).
+- Do **not** use `%` formatting (`"%s" % x`, or `logger.info("...", a, b)` with `%s` placeholders) or `str.format()` unless an external API requires it.
+- For `repr()` in messages, use `{value!r}` inside the f-string.
+
+```python
+# Good
+logger.info(f"run_id={run_id} path={path}")
+logger.debug(f"external_id={ext!r} err={msg}")
+
+# Avoid
+logger.info("run_id=%s path=%s", run_id, path)
+```
+
+**Exception:** `datetime.strptime(..., "%Y-%m-%d")` and similar **strftime/strptime format codes** are not interpolation; keep those literals.
+
+**Exception:** SQL `LIKE` patterns may use `%` as wildcards (e.g. `term = f"%{search}%"` for `ilike`).
