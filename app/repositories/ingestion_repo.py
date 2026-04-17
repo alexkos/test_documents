@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import IngestionEvent, IngestionRun
+from app.utils.logger import logger
 
 
 def utcnow() -> datetime:
@@ -34,6 +35,12 @@ def create_ingestion_run(session: Session, *, queued: bool = False) -> Ingestion
         )
     session.add(run)
     session.flush()
+    logger.debug(
+        "create_ingestion_run id=%s queued=%s status=%s",
+        run.id,
+        queued,
+        run.status,
+    )
     return run
 
 

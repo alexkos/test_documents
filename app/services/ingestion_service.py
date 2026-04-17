@@ -8,6 +8,7 @@ from app.db import get_session_factory
 from app.ingestion.runner import ingest_file
 from app.models import IngestionRun
 from app.repositories.ingestion_repo import create_ingestion_run
+from app.utils.logger import logger
 
 
 def queue_ingestion_path(file_path: str | None) -> tuple[int, Path]:
@@ -20,9 +21,11 @@ def queue_ingestion_path(file_path: str | None) -> tuple[int, Path]:
         run = create_ingestion_run(db, queued=True)
         run_id = run.id
         db.commit()
+        logger.info("Created ingestion run_id=%s (queued) for path=%s", run_id, path)
         return run_id, path
     except Exception:
         db.rollback()
+        logger.exception("Failed to queue ingestion for path=%s", path)
         raise
     finally:
         db.close()
@@ -37,7 +40,13 @@ def run_ingestion_job(run_id: int, path: Path) -> None:
             return
         ingest_file(db, path, run_row)
         db.commit()
+        logger.info(
+            "Synchronous ingestion job finished run_id=%s total=%s",
+            run_id,
+            run_row.total_records,
+        )
     except Exception:
+        logger.exception("Synchronous ingestion job failed run_id=%s path=%s", run_id, path)
         db.rollback()
         run_row = db.get(IngestionRun, run_id)
         if run_row is not None:

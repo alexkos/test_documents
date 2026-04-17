@@ -16,10 +16,24 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Configure `DATABASE_URL` (localhost for uvicorn on the host), `DEFAULT_JSONL_PATH`, and `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` in `.env` (see `.env.example`). The worker service overrides `DATABASE_URL` to reach Postgres at hostname `db`.
 - Trigger ingestion: `POST /ingestions` (optional query param `file_path`). Response: `{ "run_id": ..., "status": "queued" }`. Poll `GET /ingestions/{run_id}` for progress (`status`: `queued` → `running` → `completed` or `failed`).
 
-**Worker only (manual):**
+**Celery worker on your machine (not Docker)** — Start Redis (and Postgres if needed). Export `DATABASE_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` from `.env` (or use a shell that loads `.env`). From the project root after `uv sync`:
 
 ```bash
+# Uses the project virtualenv via uv (recommended)
+uv run celery -A app.celery_app:celery_app worker --loglevel=info
+```
+
+To run the same binary from `.venv` explicitly:
+
+```bash
+source .venv/bin/activate
 celery -A app.celery_app:celery_app worker --loglevel=info
+```
+
+Or without activating:
+
+```bash
+.venv/bin/celery -A app.celery_app:celery_app worker --loglevel=info
 ```
 
 **Tests** set `CELERY_TASK_ALWAYS_EAGER=1` so tasks run in-process without Redis.

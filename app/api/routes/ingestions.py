@@ -7,6 +7,7 @@ from app.api.deps import get_db
 from app.models import IngestionRun
 from app.services.ingestion_service import queue_ingestion_path
 from app.tasks.ingestion_tasks import run_ingestion_task
+from app.utils.logger import logger
 
 router = APIRouter()
 
@@ -18,8 +19,10 @@ def trigger_ingestion(
     try:
         run_id, resolved = queue_ingestion_path(file_path)
     except FileNotFoundError as e:
+        logger.warning("Ingestion trigger: file not found: %s", e.args[0])
         raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
     run_ingestion_task.delay(run_id, str(resolved.resolve()))
+    logger.info("Queued ingestion run_id=%s path=%s", run_id, resolved.resolve())
     return {"run_id": run_id, "status": "queued"}
 
 
@@ -27,6 +30,7 @@ def trigger_ingestion(
 def ingestion_detail(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(IngestionRun, run_id)
     if run is None:
+        logger.warning("GET ingestion run_id=%s: not found", run_id)
         raise HTTPException(status_code=404, detail="ingestion run not found")
     return {
         "ingestion_id": run.id,

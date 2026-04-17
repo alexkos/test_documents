@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import os
+
+# Run Celery tasks inline in tests (no Redis broker required for API tests).
+os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "1")
+# Celery warns if this is set without Django installed (common in dev shells).
+os.environ.pop("DJANGO_SETTINGS_MODULE", None)
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

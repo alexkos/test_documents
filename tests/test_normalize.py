@@ -6,6 +6,11 @@ def test_normalize_tags_comma_string() -> None:
     assert rec.tags == ["water", "energy"]
 
 
+def test_normalize_tags_lowercase_dedupe() -> None:
+    rec = normalize_raw_record({"external_id": "x", "tags": ["Water", "water", "Energy"]})
+    assert rec.tags == ["water", "energy"]
+
+
 def test_normalize_tags_list_with_null() -> None:
     rec = normalize_raw_record({"external_id": "x", "tags": ["a", None, "b"]})
     assert rec.tags == ["a", "b"]
