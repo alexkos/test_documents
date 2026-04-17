@@ -38,6 +38,14 @@ Or without activating:
 
 **Tests** set `CELERY_TASK_ALWAYS_EAGER=1` so tasks run in-process without Redis.
 
+**Running tests** — from the project root after `uv sync`:
+
+```bash
+uv run pytest -q
+```
+
+`pytest-cov` is included so the `--no-cov` flag is valid (it disables coverage when something enables it, e.g. a wrapper script or `PYTEST_ADDOPTS`). For day-to-day runs, plain `pytest -q` is enough; use `--no-cov` when your environment injects `--cov` and you want a faster loop.
+
 ### Async ingestion (high level)
 
 ```mermaid
