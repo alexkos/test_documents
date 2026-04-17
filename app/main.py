@@ -2,7 +2,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.routes_api import router as api_router
+from app.api.routes import documents as documents_routes
+from app.api.routes import ingestions as ingestions_routes
+from app.api.routes import stats as stats_routes
 from app.utils.logger import logger
 
 
@@ -20,7 +22,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(api_router)
+app.include_router(documents_routes.router, prefix="/documents", tags=["documents"])
+app.include_router(ingestions_routes.router, prefix="/ingestions", tags=["ingestions"])
+app.include_router(stats_routes.router, prefix="/stats", tags=["stats"])
 
 
 @app.get("/health")

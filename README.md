@@ -158,39 +158,51 @@ erDiagram
 | `GET` | `/stats` | Counts, breakdowns, top tags, average score. |
 | `GET` | `/health` | Liveness. |
 
+### Pretty-printing JSON responses
+
+API responses are compact JSON. To view them with indentation in the terminal, pipe through **`jq`** or Python’s **`json.tool`**:
+
+```bash
+curl -sS "http://localhost:8000/documents?skip=0&limit=5" | jq
+
+curl -sS "http://localhost:8000/stats" | jq
+```
+
+Interactive browsing with formatted bodies: open **Swagger UI** at [`http://localhost:8000/docs`](http://localhost:8000/docs) (when the server is running).
+
 ### `GET /documents` (curl examples)
 
-The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`.
+The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`.
 
 Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches; `search` matches **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
 
 ```bash
 # Pagination: skip (offset) and limit (1–200, default 20)
-curl -sS "http://localhost:8000/documents?skip=0&limit=20"
+curl -sS "http://localhost:8000/documents?skip=0&limit=20" | jq
 
 # published_at >= date_from (ISO YYYY-MM-DD)
-curl -sS "http://localhost:8000/documents?date_from=2020-01-01"
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01" | jq
 
 # published_at <= date_to
-curl -sS "http://localhost:8000/documents?date_to=2024-12-31"
+curl -sS "http://localhost:8000/documents?date_to=2024-12-31" | jq
 
 # Date range on published_at
-curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31"
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31" | jq
 
 # Tag (exact tag name)
-curl -sS "http://localhost:8000/documents?tag=biology"
+curl -sS "http://localhost:8000/documents?tag=biology" | jq
 
 # Organization (exact organization name; encode spaces as %20)
-curl -sS "http://localhost:8000/documents?organization=Example%20University"
+curl -sS "http://localhost:8000/documents?organization=Example%20University" | jq
 
 # Status (exact status string)
-curl -sS "http://localhost:8000/documents?status=published"
+curl -sS "http://localhost:8000/documents?status=published" | jq
 
 # Search title or body (case-insensitive)
-curl -sS "http://localhost:8000/documents?search=climate%20change"
+curl -sS "http://localhost:8000/documents?search=climate%20change" | jq
 
 # All query parameters together
-curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health"
+curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health" | jq
 ```
 
 ## Assumptions

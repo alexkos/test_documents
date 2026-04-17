@@ -1,4 +1,4 @@
-from app.normalize import normalize_raw_record
+from app.ingestion.normalizer import normalize_raw_record
 
 
 def test_normalize_tags_comma_string() -> None:

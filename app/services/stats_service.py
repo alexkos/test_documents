@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Document, Tag
+from app.models import Document, IngestionEvent, Tag
 
 
 def get_stats(db: Session) -> dict:
@@ -34,10 +34,29 @@ def get_stats(db: Session) -> dict:
 
     avg = db.scalar(select(func.avg(Document.score)).where(Document.score.isnot(None)))
 
+    total_events = db.scalar(select(func.count()).select_from(IngestionEvent)) or 0
+
+    events_by_stage: dict[str, int] = {}
+    for stage, cnt in db.execute(
+        select(IngestionEvent.stage, func.count()).group_by(IngestionEvent.stage)
+    ).all():
+        key = stage or "null"
+        events_by_stage[key] = int(cnt)
+
+    events_by_status: dict[str, int] = {}
+    for ev_st, cnt in db.execute(
+        select(IngestionEvent.status, func.count()).group_by(IngestionEvent.status)
+    ).all():
+        key = ev_st or "null"
+        events_by_status[key] = int(cnt)
+
     return {
         "total_documents": int(total),
         "by_status": by_status,
         "by_type": by_type,
         "top_tags": top_tags,
         "avg_score": float(avg) if avg is not None else None,
+        "total_ingestion_events": int(total_events),
+        "events_by_stage": events_by_stage,
+        "events_by_status": events_by_status,
     }
