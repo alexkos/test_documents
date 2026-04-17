@@ -13,28 +13,44 @@ from app.processing.summary import summarize_body_or_abstract
 
 
 def test_classify_policy_from_title() -> None:
-    assert classify_document("Energy Policy Today", None) == "policy"
+    assert classify_document(None, "Energy Policy Today", None) == "policy"
 
 
 def test_classify_policy_from_body() -> None:
-    assert classify_document(None, "Discussion of climate policy measures.") == "policy"
+    assert classify_document(None, None, "Discussion of climate policy measures.") == "policy"
 
 
 def test_classify_report_from_body() -> None:
-    assert classify_document("Annual", "This quarterly report covers Q3.") == "report"
+    assert classify_document(None, "Annual", "This quarterly report covers Q3.") == "report"
 
 
 def test_classify_policy_checked_before_report() -> None:
-    assert classify_document("Policy report", None) == "policy"
+    assert classify_document(None, "Policy report", None) == "policy"
 
 
-def test_classify_general_when_no_keywords() -> None:
-    assert classify_document("Notes", "Short memo without magic words.") == "general"
+def test_classify_data_from_text() -> None:
+    assert classify_document(None, "Dataset title", "We release the raw data today.") == "data"
 
 
-def test_classify_general_for_empty_inputs() -> None:
-    assert classify_document(None, None) == "general"
-    assert classify_document("", "") == "general"
+def test_classify_structured_document_type_takes_priority() -> None:
+    assert classify_document("report", "climate policy overview", "policy debate continues") == "report"
+
+
+def test_classify_document_type_mapping_journal_article() -> None:
+    assert classify_document("journal_article", "Short", "Body") == "research"
+
+
+def test_classify_document_type_mapping_press_release() -> None:
+    assert classify_document("press_release", None, None) == "news"
+
+
+def test_classify_other_when_no_match() -> None:
+    assert classify_document(None, "Notes", "Short memo without magic words.") == "other"
+
+
+def test_classify_other_for_empty_inputs() -> None:
+    assert classify_document(None, None, None) == "other"
+    assert classify_document(None, "", "") == "other"
 
 
 def test_extract_keywords_empty_returns_empty() -> None:

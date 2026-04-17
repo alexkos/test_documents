@@ -17,6 +17,6 @@ def apply_processing(doc: Document, rec: NormalizedRecord) -> None:
     logger.debug(f"apply_processing document_id={doc.id} external_id={rec.external_id!r}")
     blob = " ".join(filter(None, [rec.title, rec.abstract, rec.body]))
     doc.keywords = extract_keywords(blob)
-    doc.classification = classify_document(rec.title, rec.body)
+    doc.classification = classify_document(rec.document_type, rec.title, rec.body)
     doc.score = compute_score(doc)
     doc.summary = summarize_body_or_abstract(rec.body, rec.abstract)

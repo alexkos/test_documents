@@ -10,7 +10,11 @@ def extract_keywords(text: str | None, top_n: int = 12) -> list[str]:
     if not text or not text.strip():
         return []
     vectorizer = TfidfVectorizer(stop_words="english", token_pattern=_TOKEN_PATTERN)
-    matrix = vectorizer.fit_transform([text])
+    try:
+        matrix = vectorizer.fit_transform([text])
+    except ValueError:
+        # e.g. only stop words or tokens shorter than token_pattern (empty vocabulary)
+        return []
     row = matrix.getrow(0)
     scores = row.data
     names = vectorizer.get_feature_names_out()[row.indices]
