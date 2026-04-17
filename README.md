@@ -158,6 +158,41 @@ erDiagram
 | `GET` | `/stats` | Counts, breakdowns, top tags, average score. |
 | `GET` | `/health` | Liveness. |
 
+### `GET /documents` (curl examples)
+
+The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`.
+
+Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches; `search` matches **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
+
+```bash
+# Pagination: skip (offset) and limit (1–200, default 20)
+curl -sS "http://localhost:8000/documents?skip=0&limit=20"
+
+# published_at >= date_from (ISO YYYY-MM-DD)
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01"
+
+# published_at <= date_to
+curl -sS "http://localhost:8000/documents?date_to=2024-12-31"
+
+# Date range on published_at
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31"
+
+# Tag (exact tag name)
+curl -sS "http://localhost:8000/documents?tag=biology"
+
+# Organization (exact organization name; encode spaces as %20)
+curl -sS "http://localhost:8000/documents?organization=Example%20University"
+
+# Status (exact status string)
+curl -sS "http://localhost:8000/documents?status=published"
+
+# Search title or body (case-insensitive)
+curl -sS "http://localhost:8000/documents?search=climate%20change"
+
+# All query parameters together
+curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health"
+```
+
 ## Assumptions
 
 - `external_id` is the stable business key; re-ingesting the same id updates the row (idempotent upsert).

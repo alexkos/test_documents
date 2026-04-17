@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.config import resolved_jsonl_path
 from app.db import get_session_factory, get_db
 from app.ingestion import create_ingestion_run
-from app.models import Document, IngestionRun, Organization, Tag
+from app.models import Document, IngestionRun, Tag
+from app.services import document_service
 from app.tasks.ingestion_tasks import run_ingestion_task
 from app.utils.logger import logger
 
@@ -22,12 +22,6 @@ def _document_to_out(doc: Document) -> dict:
         **{c.name: getattr(doc, c.name) for c in Document.__table__.columns},
         "tags": [t.name for t in doc.tags],
     }
-
-
-def _parse_date(s: str | None) -> date | None:
-    if not s:
-        return None
-    return date.fromisoformat(s[:10])
 
 
 @router.post("/ingestions")
@@ -90,41 +84,17 @@ def list_documents(
     status: str | None = None,
     search: str | None = None,
 ) -> dict:
-    df = _parse_date(date_from)
-    dt = _parse_date(date_to)
-
-    q = select(Document)
-    count_q = select(func.count(func.distinct(Document.id))).select_from(Document)
-
-    if tag:
-        q = q.join(Document.tags).where(Tag.name == tag)
-        count_q = count_q.join(Document.tags).where(Tag.name == tag)
-    if organization:
-        q = q.join(Document.organization).where(Organization.name == organization)
-        count_q = count_q.join(Document.organization).where(Organization.name == organization)
-    if status:
-        q = q.where(Document.status == status)
-        count_q = count_q.where(Document.status == status)
-    if df:
-        q = q.where(Document.published_at >= df)
-        count_q = count_q.where(Document.published_at >= df)
-    if dt:
-        q = q.where(Document.published_at <= dt)
-        count_q = count_q.where(Document.published_at <= dt)
-    if search:
-        term = f"%{search}%"
-        q = q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
-        count_q = count_q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
-
-    total = db.scalar(count_q) or 0
-    q = q.distinct().offset(skip).limit(limit)
-    rows = db.execute(q).scalars().unique().all()
-    return {
-        "items": [_document_to_out(d) for d in rows],
-        "total": total,
-        "skip": skip,
-        "limit": limit,
-    }
+    return document_service.list_documents(
+        db,
+        skip=skip,
+        limit=limit,
+        date_from=date_from,
+        date_to=date_to,
+        tag=tag,
+        organization=organization,
+        status=status,
+        search=search,
+    )
 
 
 @router.get("/documents/{doc_id}")

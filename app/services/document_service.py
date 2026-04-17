@@ -36,32 +36,35 @@ def list_documents(
     df = _parse_date(date_from)
     dt = _parse_date(date_to)
 
-    q = select(Document)
+    # DISTINCT on full Document rows fails on PostgreSQL when `keywords` is JSON (no = operator).
+    # De-duplicate by document id first, then load rows (portable across SQLite/Postgres).
+    id_q = select(Document.id).select_from(Document)
     count_q = select(func.count(func.distinct(Document.id))).select_from(Document)
 
     if tag:
-        q = q.join(Document.tags).where(Tag.name == tag)
+        id_q = id_q.join(Document.tags).where(Tag.name == tag)
         count_q = count_q.join(Document.tags).where(Tag.name == tag)
     if organization:
-        q = q.join(Document.organization).where(Organization.name == organization)
+        id_q = id_q.join(Document.organization).where(Organization.name == organization)
         count_q = count_q.join(Document.organization).where(Organization.name == organization)
     if status:
-        q = q.where(Document.status == status)
+        id_q = id_q.where(Document.status == status)
         count_q = count_q.where(Document.status == status)
     if df:
-        q = q.where(Document.published_at >= df)
+        id_q = id_q.where(Document.published_at >= df)
         count_q = count_q.where(Document.published_at >= df)
     if dt:
-        q = q.where(Document.published_at <= dt)
+        id_q = id_q.where(Document.published_at <= dt)
         count_q = count_q.where(Document.published_at <= dt)
     if search:
         term = f"%{search}%"
-        q = q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
+        id_q = id_q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
         count_q = count_q.where((Document.title.ilike(term)) | (Document.body.ilike(term)))
 
     total = db.scalar(count_q) or 0
-    q = q.distinct().offset(skip).limit(limit)
-    rows = db.execute(q).scalars().unique().all()
+    id_subq = id_q.distinct().order_by(Document.id).offset(skip).limit(limit).subquery()
+    q = select(Document).join(id_subq, Document.id == id_subq.c.id).order_by(Document.id)
+    rows = db.execute(q).scalars().all()
     return {
         "items": [_document_to_out(d) for d in rows],
         "total": total,
