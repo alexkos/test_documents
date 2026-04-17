@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_db
+from app.models import IngestionRun
+from app.services.ingestion_service import queue_ingestion_path, run_ingestion_job
+
+router = APIRouter()
+
+
+@router.post("")
+def trigger_ingestion(
+    background_tasks: BackgroundTasks,
+    file_path: str | None = None,
+) -> dict:
+    try:
+        run_id, resolved = queue_ingestion_path(file_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
+    background_tasks.add_task(run_ingestion_job, run_id, resolved)
+    return {"run_id": run_id}
+
+
+@router.get("/{run_id}")
+def ingestion_detail(run_id: int, db: Session = Depends(get_db)) -> dict:
+    run = db.get(IngestionRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="ingestion run not found")
+    return {
+        "ingestion_id": run.id,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "total_records": run.total_records,
+        "success_count": run.success_count,
+        "error_count": run.error_count,
+        "skipped_count": run.skipped_count,
+        "status": run.status,
+        "events": [
+            {
+                "external_id": e.external_id,
+                "status": e.status,
+                "message": e.message,
+                "stage": e.stage,
+            }
+            for e in run.events
+        ],
+    }

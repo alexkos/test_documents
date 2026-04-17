@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: docintake
+      POSTGRES_PASSWORD: docintake
+      POSTGRES_DB: docintake
+    ports:
+      - "5432:5432"
+    volumes:
+      - docintake_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docintake -d docintake"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  docintake_pgdata:

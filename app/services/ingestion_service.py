@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app.config import resolved_jsonl_path
+from app.db import get_session_factory
+from app.ingestion.runner import ingest_file
+from app.models import IngestionRun
+from app.repositories.ingestion_repo import create_ingestion_run
+
+
+def queue_ingestion_path(file_path: str | None) -> tuple[int, Path]:
+    path = Path(file_path) if file_path else resolved_jsonl_path()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        run = create_ingestion_run(db)
+        run_id = run.id
+        db.commit()
+        return run_id, path
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def run_ingestion_job(run_id: int, path: Path) -> None:
+    SessionLocal = get_session_factory()
+    db = SessionLocal()
+    try:
+        run_row = db.get(IngestionRun, run_id)
+        if run_row is None:
+            return
+        ingest_file(db, path, run_row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        run_row = db.get(IngestionRun, run_id)
+        if run_row is not None:
+            run_row.status = "failed"
+            run_row.finished_at = datetime.now(timezone.utc)
+            db.commit()
+    finally:
+        db.close()
