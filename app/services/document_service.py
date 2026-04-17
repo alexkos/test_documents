@@ -83,6 +83,10 @@ def list_documents(
                     f"Document search: Elasticsearch returned no documents "
                     f"(total={total}) query={qlog!r}"
                 )
+                logger.info(
+                    f"Document list: data_from=elasticsearch (no hits); "
+                    f"postgresql not queried for items total={total}"
+                )
                 return {
                     "items": [],
                     "total": total,
@@ -105,6 +109,10 @@ def list_documents(
             )
             rows = list(db.execute(q).scalars().all())
             rows.sort(key=lambda d: id_order.get(d.id, 10**9))
+            logger.info(
+                f"Document list: data_from=elasticsearch (match/rank) + postgresql "
+                f"(load rows by id) total={total} page_count={len(rows)}"
+            )
             return {
                 "items": [_document_to_out(d) for d in rows],
                 "total": total,
@@ -160,6 +168,9 @@ def list_documents(
             f"Document search: using SQL ilike ({sql_search_reason}) "
             f"total={total} page_count={len(rows)} query={qlog!r}"
         )
+    logger.info(
+        f"Document list: data_from=postgresql (sql) total={total} page_count={len(rows)}"
+    )
     return {
         "items": [_document_to_out(d) for d in rows],
         "total": total,
