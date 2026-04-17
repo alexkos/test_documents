@@ -213,3 +213,128 @@ curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&d
 - **Hard validation** (line fails with a validation event): missing or blank `external_id`; non-empty `published_at` or `updated_at` that is not a valid `YYYY-MM-DD` string; empty JSON object `{}` after parse; unparseable JSON lines (logged under parsing).
 - Blank lines in the file are skipped and do not increment the run’s line counter.
 - Semantic duplicates share the same content fingerprint; the second **distinct** `external_id` is skipped and logged under `deduplication`.
+
+## Stats produced (`GET /stats`)
+
+Aggregates over all stored documents and ingestion-event telemetry. Shape:
+
+| Field | Meaning |
+|--------|--------|
+| `total_documents` | Row count in `documents`. |
+| `by_status` | Counts grouped by `Document.status` (missing status appears as key `"null"`). |
+| `by_type` | Counts grouped by `document_type` (missing → `"null"`). |
+| `top_tags` | Up to 10 tags by frequency across `document_tags`. |
+| `avg_score` | Mean of `Document.score` where score is non-null; `null` if none. |
+| `total_ingestion_events` | Rows in `ingestion_events` (lifetime, all runs). |
+| `events_by_stage` | Counts of ingestion events by `stage` (`parsing`, `validation`, `deduplication`, `completed`, etc.). |
+| `events_by_status` | Counts by event `status` (`success`, `error`, `skipped`). |
+
+Example response (illustrative; numbers depend on your DB):
+
+```json
+{
+  "total_documents": 1240,
+  "by_status": {
+    "published": 980,
+    "draft": 120,
+    "unknown": 140
+  },
+  "by_type": {
+    "article": 800,
+    "report": 200,
+    "null": 240
+  },
+  "top_tags": [
+    { "name": "biology", "count": 310 },
+    { "name": "climate", "count": 205 }
+  ],
+  "avg_score": 42.7,
+  "total_ingestion_events": 5600,
+  "events_by_stage": {
+    "completed": 1240,
+    "parsing": 45,
+    "validation": 30,
+    "deduplication": 15
+  },
+  "events_by_status": {
+    "success": 1240,
+    "error": 75,
+    "skipped": 15
+  }
+}
+```
+
+```bash
+curl -sS "http://localhost:8000/stats" | jq
+```
+
+## Sample execution log
+
+Ingestion emits **structured application logs** (worker / API process) and persists a **per-run summary plus per-line events** queryable via `GET /ingestions/{run_id}`.
+
+### Worker log excerpt (Celery + pipeline)
+
+After `POST /ingestions`, the worker logs task lifecycle and the runner logs start/finish with counters. Example lines (timestamps and IDs will differ):
+
+```text
+Celery ingestion task started run_id=3 path=/app/input_docs/documents_1.jsonl
+Starting ingestion run_id=3 path=/app/input_docs/documents_1.jsonl
+Finished ingestion run_id=3 total=4000 success=3950 errors=35 skipped=15
+Celery ingestion task completed run_id=3 total=4000 success=3950 errors=35 skipped=15
+```
+
+- **`total`** — non-blank JSONL lines read (see [Assumptions](#assumptions) for blank lines).
+- **`success`** — lines upserted successfully.
+- **`errors`** — parse failures, empty `{}`, or validation failures (`stage` `parsing` or `validation` in events).
+- **`skipped`** — semantic duplicates (`stage` `deduplication`).
+
+### Run summary JSON (`GET /ingestions/{run_id}`)
+
+Poll until `status` is `completed` or `failed`. Example body after a successful run (truncated `events` for readability; real responses include one event per processed line where logging applies):
+
+```bash
+curl -sS "http://localhost:8000/ingestions/3" | jq
+```
+
+```json
+{
+  "ingestion_id": 3,
+  "started_at": "2026-04-17T12:01:02.123456+00:00",
+  "finished_at": "2026-04-17T12:03:44.987654+00:00",
+  "total_records": 4000,
+  "success_count": 3950,
+  "error_count": 35,
+  "skipped_count": 15,
+  "status": "completed",
+  "events": [
+    {
+      "external_id": "doc-00001",
+      "status": "success",
+      "message": null,
+      "stage": "completed"
+    },
+    {
+      "external_id": null,
+      "status": "error",
+      "message": "invalid JSON or empty payload",
+      "stage": "parsing"
+    },
+    {
+      "external_id": "doc-00442",
+      "status": "skipped",
+      "message": "semantic duplicate of document doc-00102",
+      "stage": "deduplication"
+    }
+  ]
+}
+```
+
+## What you would improve with more time
+
+- **Full-text search** — PostgreSQL `tsvector` / GIN instead of `ILIKE` on title/body for large corpora.
+- **Authentication and rate limits** on `/ingestions` and bulk export endpoints.
+- **Explicit enrichment events** — optional `ingestion_events` rows for keyword/classification/summary stages (today enrichment runs in-process; only dedup/validation/parsing surface as stages in the event list).
+- **Nested author/organization** on `GET /documents/{id}` — return `{ "id", "name" }` objects instead of only foreign-key columns.
+- **Batch or streaming ingestion** — multipart uploads, S3/GCS sources, checkpointing for huge files.
+- **Observability** — OpenTelemetry traces, structured JSON logs to a collector, metrics (Prometheus) for ingest duration and queue depth.
+- **Load and contract tests** — performance budgets against sample multi-GB JSONL; OpenAPI response examples generated from fixtures.
