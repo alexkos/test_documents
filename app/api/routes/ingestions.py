@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,13 +18,22 @@ router = APIRouter()
 def trigger_ingestion(
     file_path: str | None = None,
 ) -> dict:
+    logger.info(f"Ingestion trigger: file_path={file_path}")
     try:
         run_id, resolved = queue_ingestion_path(file_path)
     except FileNotFoundError as e:
         logger.warning(f"Ingestion trigger: file not found: {e.args[0]}")
         raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
-    run_ingestion_task.delay(run_id, str(resolved.resolve()))
-    logger.info(f"Queued ingestion run_id={run_id} path={resolved.resolve()}")
+
+    project_root = Path(__file__).resolve().parents[3]
+    abs_path = resolved.resolve()
+    rel_path = (
+        abs_path.relative_to(project_root)
+        if abs_path.is_relative_to(project_root)
+        else abs_path
+    )
+    run_ingestion_task.delay(run_id, str(rel_path))
+    logger.info(f"Queued ingestion run_id={run_id} path={rel_path}")
     return {"run_id": run_id, "status": "queued"}
 
 
