@@ -4,7 +4,7 @@ FastAPI service that ingests messy JSONL document feeds, normalizes fields, enri
 
 ## How to run
 
-'''
+```
 cp .env.example .env
 # copy files to input_docs/
 uv sync
@@ -12,7 +12,7 @@ source .venv/bin/activate
 docker compose up -d
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-'''
+```
 
 ```bash
 curl -X POST "http://localhost:8000/ingestions?file_path=input_docs/documents_1.jsonl"
