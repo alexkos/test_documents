@@ -8,11 +8,58 @@ FastAPI service that ingests messy JSONL document feeds, normalizes fields, enri
 
 ```bash
 cp .env.example .env
+# copy files to input_docs/
 docker compose up -d
 uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+### Ingest data
+
+With **uvicorn** and the **Celery worker** (Docker or local) running, enqueue a JSONL ingest by `POST`ing to `/ingestions`. Use the `file_path` query parameter for a path relative to the project root (or an absolute path); it must be readable by the worker process (e.g. files under `input_docs/` when that directory is mounted).
+
+```bash
+curl -X POST "http://localhost:8000/ingestions?file_path=input_docs/documents_1.jsonl"
+```
+
+The response is JSON with `run_id` and `status: "queued"`. Poll `GET /ingestions/{run_id}` until `status` is `completed` or `failed`.
+
+### `GET /documents` (curl examples)
+
+The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`. Each document object includes `author` and `organization` as `{ "id": <int>, "name": <string> }` when set, or `null` when not linked (top-level `author_id` / `organization_id` are not returned).
+
+Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches. With **Elasticsearch** enabled (`ELASTICSEARCH_URL` and not disabled), `search` uses the ES index (title/body text); otherwise it uses SQL **`ILIKE`** on **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
+
+```bash
+# Pagination: skip (offset) and limit (1–200, default 20)
+curl -sS "http://localhost:8000/documents?skip=0&limit=20" | jq
+
+# published_at >= date_from (ISO YYYY-MM-DD)
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01" | jq
+
+# published_at <= date_to
+curl -sS "http://localhost:8000/documents?date_to=2024-12-31" | jq
+
+# Date range on published_at
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31" | jq
+
+# Tag (exact tag name)
+curl -sS "http://localhost:8000/documents?tag=biology" | jq
+
+# Organization (exact organization name; encode spaces as %20)
+curl -sS "http://localhost:8000/documents?organization=Example%20University" | jq
+
+# Status (exact status string)
+curl -sS "http://localhost:8000/documents?status=published" | jq
+
+# Search title or body (case-insensitive)
+curl -sS "http://localhost:8000/documents?search=climate%20change" | jq
+
+# All query parameters together
+curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health" | jq
+```
+
 
 - The first `docker compose up` **builds** the worker image (`worker` in `docker-compose.yml`) and can take several minutes. **Elasticsearch** may need extra time on a cold start before its health check passes; the worker starts only after `db`, `redis`, and `elasticsearch` are healthy.
 - Create a local **`input_docs/`** directory and place your JSONL there (it is gitignored). Defaults match `.env.example` (`DEFAULT_JSONL_PATH=input_docs/documents_1.jsonl`). Alternatively pass an absolute or project-relative path via `POST /ingestions?file_path=...`.
@@ -242,40 +289,6 @@ curl -sS "http://localhost:8000/stats" | jq
 
 Interactive browsing with formatted bodies: open **Swagger UI** at [`http://localhost:8000/docs`](http://localhost:8000/docs) (when the server is running).
 
-### `GET /documents` (curl examples)
-
-The examples below assume the API is at `http://localhost:8000` (see [How to run](#how-to-run)). Each pipes the response through **`jq`** for indented JSON (see [Pretty-printing JSON responses](#pretty-printing-json-responses); you can use `python -m json.tool` instead). Response shape: `{ "items": [...], "total": <int>, "skip": <int>, "limit": <int> }`. Each document object includes `author` and `organization` as `{ "id": <int>, "name": <string> }` when set, or `null` when not linked (top-level `author_id` / `organization_id` are not returned).
-
-Replace placeholder values (`biology`, `Example University`, dates, etc.) with values that exist in your database. `tag`, `organization`, and `status` are **exact** string matches. With **Elasticsearch** enabled (`ELASTICSEARCH_URL` and not disabled), `search` uses the ES index (title/body text); otherwise it uses SQL **`ILIKE`** on **title or body** (case-insensitive substring). `date_from` / `date_to` filter on **`published_at`** (inclusive range when both are set).
-
-```bash
-# Pagination: skip (offset) and limit (1–200, default 20)
-curl -sS "http://localhost:8000/documents?skip=0&limit=20" | jq
-
-# published_at >= date_from (ISO YYYY-MM-DD)
-curl -sS "http://localhost:8000/documents?date_from=2020-01-01" | jq
-
-# published_at <= date_to
-curl -sS "http://localhost:8000/documents?date_to=2024-12-31" | jq
-
-# Date range on published_at
-curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31" | jq
-
-# Tag (exact tag name)
-curl -sS "http://localhost:8000/documents?tag=biology" | jq
-
-# Organization (exact organization name; encode spaces as %20)
-curl -sS "http://localhost:8000/documents?organization=Example%20University" | jq
-
-# Status (exact status string)
-curl -sS "http://localhost:8000/documents?status=published" | jq
-
-# Search title or body (case-insensitive)
-curl -sS "http://localhost:8000/documents?search=climate%20change" | jq
-
-# All query parameters together
-curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health" | jq
-```
 
 ## Assumptions
 

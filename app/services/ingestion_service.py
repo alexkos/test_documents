@@ -4,6 +4,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import resolved_jsonl_path
+
+
+def discover_ingestion_files() -> list[Path]:
+    """Paths to ingest when no file_path is given: *.jsonl and *.json in the default feed directory."""
+    directory = resolved_jsonl_path().parent
+    if not directory.is_dir():
+        raise FileNotFoundError(directory)
+    exts = {".json", ".jsonl"}
+    return sorted(
+        p
+        for p in directory.iterdir()
+        if p.is_file() and p.suffix.lower() in exts
+    )
 from app.db import get_session_factory
 from app.ingestion.runner import ingest_file
 from app.models import IngestionRun

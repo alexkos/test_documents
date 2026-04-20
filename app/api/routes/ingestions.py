@@ -6,8 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.config import resolved_jsonl_path
 from app.models import IngestionRun
-from app.services.ingestion_service import queue_ingestion_path
+from app.services.ingestion_service import discover_ingestion_files, queue_ingestion_path
 from app.tasks.ingestion_tasks import run_ingestion_task
 from app.utils.logger import logger
 
@@ -19,22 +20,54 @@ def trigger_ingestion(
     file_path: str | None = None,
 ) -> dict:
     logger.info(f"Ingestion trigger: file_path={file_path}")
-    try:
-        run_id, resolved = queue_ingestion_path(file_path)
-    except FileNotFoundError as e:
-        logger.warning(f"Ingestion trigger: file not found: {e.args[0]}")
-        raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
-
     project_root = Path(__file__).resolve().parents[3]
-    abs_path = resolved.resolve()
-    rel_path = (
-        abs_path.relative_to(project_root)
-        if abs_path.is_relative_to(project_root)
-        else abs_path
-    )
-    run_ingestion_task.delay(run_id, str(rel_path))
-    logger.info(f"Queued ingestion run_id={run_id} path={rel_path}")
-    return {"run_id": run_id, "status": "queued"}
+
+    def rel_path_for(resolved: Path) -> Path:
+        abs_path = resolved.resolve()
+        return (
+            abs_path.relative_to(project_root)
+            if abs_path.is_relative_to(project_root)
+            else abs_path
+        )
+
+    if file_path and file_path.strip():
+        try:
+            run_id, resolved = queue_ingestion_path(file_path)
+        except FileNotFoundError as e:
+            logger.warning(f"Ingestion trigger: file not found: {e.args[0]}")
+            raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
+        rel = rel_path_for(resolved)
+        run_ingestion_task.delay(run_id, str(rel))
+        logger.info(f"Queued ingestion run_id={run_id} path={rel}")
+        return {"run_id": run_id, "status": "queued"}
+
+    try:
+        paths = discover_ingestion_files()
+    except FileNotFoundError as e:
+        logger.warning(f"Ingestion trigger: directory not found: {e.args[0]}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"ingestion directory not found: {e.args[0]}",
+        ) from e
+    if not paths:
+        inbox = resolved_jsonl_path().parent
+        raise HTTPException(
+            status_code=400,
+            detail=f"no .jsonl or .json files in {inbox}",
+        )
+
+    runs: list[dict] = []
+    for path in paths:
+        try:
+            run_id, resolved = queue_ingestion_path(str(path))
+        except FileNotFoundError as e:
+            logger.warning(f"Ingestion trigger: file not found: {e.args[0]}")
+            raise HTTPException(status_code=400, detail=f"file not found: {e.args[0]}") from e
+        rel = rel_path_for(resolved)
+        run_ingestion_task.delay(run_id, str(rel))
+        logger.info(f"Queued ingestion run_id={run_id} path={rel}")
+        runs.append({"run_id": run_id, "file_path": str(rel)})
+    return {"status": "queued", "runs": runs}
 
 
 @router.get("/{run_id}")
