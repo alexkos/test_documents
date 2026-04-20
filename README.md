@@ -4,13 +4,64 @@ FastAPI service that ingests messy JSONL document feeds, normalizes fields, enri
 
 ## How to run
 
+'''
+cp .env.example .env
+# copy files to input_docs/
+uv sync
+source .venv/bin/activate
+docker compose up -d
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+'''
+
+```bash
+curl -X POST "http://localhost:8000/ingestions?file_path=input_docs/documents_1.jsonl"
+
+# stats
+curl -sS "http://localhost:8000/stats" | jq
+
+# ingestion details
+curl -sS "http://localhost:8000/ingestions/1" | jq
+
+# document details
+curl -sS "http://localhost:8000//documents/1" | jq
+
+# Pagination: skip (offset) and limit (1–200, default 20)
+curl -sS "http://localhost:8000/documents?skip=0&limit=20" | jq
+
+# published_at >= date_from (ISO YYYY-MM-DD)
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01" | jq
+
+# published_at <= date_to
+curl -sS "http://localhost:8000/documents?date_to=2024-12-31" | jq
+
+# Date range on published_at
+curl -sS "http://localhost:8000/documents?date_from=2020-01-01&date_to=2024-12-31" | jq
+
+# Tag (exact tag name)
+curl -sS "http://localhost:8000/documents?tag=biology" | jq
+
+# Organization (exact organization name; encode spaces as %20)
+curl -sS "http://localhost:8000/documents?organization=Example%20University" | jq
+
+# Status (exact status string)
+curl -sS "http://localhost:8000/documents?status=published" | jq
+
+# Search title or body (case-insensitive)
+curl -sS "http://localhost:8000/documents?search=climate%20change" | jq
+
+# All query parameters together
+curl -sS "http://localhost:8000/documents?skip=0&limit=50&date_from=2020-01-01&date_to=2025-12-31&tag=biology&organization=Example%20University&status=published&search=health" | jq
+```
+
 **Prerequisites:** Python 3.11 or newer, [uv](https://docs.astral.sh/uv/) for dependencies, and Docker with Compose (for PostgreSQL, Redis, Elasticsearch, and the bundled Celery worker).
 
 ```bash
 cp .env.example .env
 # copy files to input_docs/
-docker compose up -d
 uv sync
+source .venv/bin/activate
+docker compose up -d
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
